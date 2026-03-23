@@ -110,14 +110,18 @@ class HdStMaterialXShaderGenGlsl
 {
 public:
     HdStMaterialXShaderGenGlsl(HdSt_MxShaderGenInfo const& mxHdInfo);
-    
+
     static MaterialX::ShaderGeneratorPtr create(
             HdSt_MxShaderGenInfo const& mxHdInfo) {
         return std::make_shared<HdStMaterialXShaderGenGlsl>(mxHdInfo);
     }
-    
+
     MaterialX::ShaderPtr generate(const std::string& shaderName,
                            MaterialX::ElementPtr mxElement,
+                           MaterialX::GenContext& mxContext) const override;
+
+    MaterialX::ShaderPtr generate(const std::string& shaderName,
+                           MaterialX::ShaderGraphPtr graph,
                            MaterialX::GenContext& mxContext) const override;
 
 private:
@@ -140,14 +144,18 @@ class HdStMaterialXShaderGenVkGlsl
 {
 public:
     HdStMaterialXShaderGenVkGlsl(HdSt_MxShaderGenInfo const& mxHdInfo);
-    
+
     static MaterialX::ShaderGeneratorPtr create(
             HdSt_MxShaderGenInfo const& mxHdInfo) {
         return std::make_shared<HdStMaterialXShaderGenVkGlsl>(mxHdInfo);
     }
-    
+
     MaterialX::ShaderPtr generate(const std::string& shaderName,
                            MaterialX::ElementPtr mxElement,
+                           MaterialX::GenContext& mxContext) const override;
+
+    MaterialX::ShaderPtr generate(const std::string& shaderName,
+                           MaterialX::ShaderGraphPtr graph,
                            MaterialX::GenContext& mxContext) const override;
 
 private:
@@ -170,14 +178,18 @@ class HdStMaterialXShaderGenMsl
 {
 public:
     HdStMaterialXShaderGenMsl(HdSt_MxShaderGenInfo const& mxHdInfo);
-    
+
     static MaterialX::ShaderGeneratorPtr create(
             HdSt_MxShaderGenInfo const& mxHdInfo) {
         return std::make_shared<HdStMaterialXShaderGenMsl>(mxHdInfo);
     }
-    
+
     MaterialX::ShaderPtr generate(const std::string& shaderName,
                            MaterialX::ElementPtr mxElement,
+                           MaterialX::GenContext& mxContext) const override;
+
+    MaterialX::ShaderPtr generate(const std::string& shaderName,
+                           MaterialX::ShaderGraphPtr graph,
                            MaterialX::GenContext& mxContext) const override;
 private:
     void _EmitGlslfxMetalShader(const MaterialX::ShaderGraph& mxGraph,

@@ -27,6 +27,9 @@ if (${PXR_ENABLE_MATERIALX_SUPPORT})
          materialXFilter
          materialXShaderGen
     )
+    if(PXR_ENABLE_MATERIALX_GENSHADER2)
+        list(APPEND optionalLibs MaterialXGenShader2)
+    endif()
 endif()
 if (PXR_ENABLE_PTEX_SUPPORT)
     list(APPEND optionalLibs Ptex::Ptex_dynamic)

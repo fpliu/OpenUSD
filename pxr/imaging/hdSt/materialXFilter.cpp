@@ -29,7 +29,12 @@
 #include <MaterialXGenShader/Util.h>
 #include <MaterialXGenShader/DefaultColorManagementSystem.h>
 #include <MaterialXRender/Util.h>
-#include <MaterialXRender/LightHandler.h> 
+#include <MaterialXRender/LightHandler.h>
+
+#ifdef PXR_MATERIALX_GENSHADER2_ENABLED
+#include "pxr/imaging/hdMtlx/hdMtlxShaderSource.h"
+#include <MaterialXGenShader2/GenContextCreate.h>
+#endif
 
 #include <fstream>
 
@@ -262,6 +267,77 @@ HdSt_GenMaterialXShader(
     return _GenMaterialXShader(mxContext, shaderNode);
 }
 
+#ifdef PXR_MATERIALX_GENSHADER2_ENABLED
+// Generate glslfx shader from an IShaderSource — no mx::Document required.
+mx::ShaderPtr
+HdSt_GenMaterialXShader(
+    std::unique_ptr<mx::IShaderSource> shaderSource,
+    mx::DocumentPtr const& stdLibraries,
+    mx::FileSearchPath const& searchPaths,
+    HdSt_MxShaderGenInfo const& mxHdInfo,
+    TfToken const& apiName)
+{
+    TRACE_FUNCTION_SCOPE("Create Storm Shader from IShaderSource")
+
+    // Obtain the appropriate Storm generator (same as _InitHdStMaterialXContext).
+    mx::ShaderGeneratorPtr generator;
+    if (apiName == HgiTokens->Metal) {
+        generator = HdStMaterialXShaderGenMsl::create(mxHdInfo);
+    } else if (apiName == HgiTokens->Vulkan) {
+        generator = HdStMaterialXShaderGenVkGlsl::create(mxHdInfo);
+    } else {
+        generator = HdStMaterialXShaderGenGlsl::create(mxHdInfo);
+    }
+
+    mx::GenContextCreate genCtx(generator, std::move(shaderSource));
+    mx::GenContext& mxContext = genCtx.getGenContext();
+
+    // Apply the same options as HdSt_GenMaterialXShader(DocumentPtr).
+    const bool hasTransparency =
+        mxHdInfo.materialTag != HdStMaterialTagTokens->defaultMaterialTag;
+    mxContext.getOptions().hwTransparency = hasTransparency;
+    mxContext.getOptions().hwShadowMap =
+        mxContext.getOptions().hwShadowMap && !hasTransparency;
+    mxContext.getOptions().hwTransmissionRenderMethod =
+        mx::HwTransmissionRenderMethod::TRANSMISSION_OPACITY;
+    mxContext.getOptions().hwSpecularEnvironmentMethod =
+        mx::HwSpecularEnvironmentMethod::SPECULAR_ENVIRONMENT_PREFILTER;
+
+    mx::FileSearchPath libSearchPaths;
+    for (const mx::FilePath& path : searchPaths) {
+        if (path.getBaseName() == "libraries") {
+            libSearchPaths.append(path.getParentPath());
+        } else {
+            libSearchPaths.append(path);
+        }
+    }
+    mxContext.registerSourceCodeSearchPath(libSearchPaths);
+
+    mx::DefaultColorManagementSystemPtr cms =
+        mx::DefaultColorManagementSystem::create(generator->getTarget());
+    cms->loadLibrary(stdLibraries);
+    generator->setColorManagementSystem(cms);
+
+    mxContext.getOptions().targetColorSpaceOverride = "lin_rec709";
+
+    // Build a minimal document containing the stdlib + light node instances
+    // so LightHandler can register lights into the context.
+    mx::DocumentPtr lightDoc = mx::createDocument();
+    lightDoc->importLibrary(stdLibraries);
+    {
+        mx::DocumentPtr lightNodeDoc = mx::createDocument();
+        mx::readFromXmlString(lightNodeDoc, mxDirectLightString);
+        lightDoc->importLibrary(lightNodeDoc);
+    }
+    mx::LightHandler lightHandler;
+    std::vector<mx::NodePtr> lights;
+    lightHandler.findLights(lightDoc, lights);
+    lightHandler.registerLights(lightDoc, lights, mxContext);
+
+    return genCtx.buildShader("Shader");
+}
+#endif // PXR_MATERIALX_GENSHADER2_ENABLED
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Helper Functions to convert MX texture node parameters to Hd parameters
@@ -492,9 +568,10 @@ _UpdatePrimvarNodes(
             std::string const& primvarName =
                 HdMtlxConvertToString(primvarNameIt->second);
 
-            // Figure out the mx typename
-            mx::NodeDefPtr mxNodeDef = mxDoc->getNodeDef(
-                    hdPrimvarNode.nodeTypeId.GetString());
+            // Figure out the mx typename — use HdMtlxGetNodeDef so this works
+            // whether or not an mxDoc is available.
+            mx::NodeDefPtr mxNodeDef =
+                HdMtlxGetNodeDef(hdPrimvarNode.nodeTypeId);
             if (mxNodeDef) {
                 (*mxHdPrimvarMap)[primvarName] = mxNodeDef->getType();
             }
@@ -1316,14 +1393,37 @@ _GenerateMaterialXShader(
 {
     TF_DEBUG(HDST_MTLX).Msg("\nGenerate MaterialX Shader for:\n"
         " - <%s> material\n - bindless textures %s enabled\n"
-        " - '%s' api\n - '%s' materialTag.\n\n", 
+        " - '%s' api\n - '%s' materialTag.\n\n",
         materialPath.GetAsString().c_str(),
         (bindlessTexturesEnabled ? "" : "not"), apiName.GetText(),
         materialTagToken.GetText());
 
-    // Create the MaterialX Document from the HdMaterialNetwork
     const mx::DocumentPtr& stdLibraries = HdMtlxStdLibraries();
+    HdSt_MxShaderGenInfo mxHdInfo;
     HdMtlxTexturePrimvarData hdMtlxData;
+
+#ifdef PXR_MATERIALX_GENSHADER2_ENABLED
+    // New path: drive generation via IShaderSource — no mx::Document required.
+    auto shaderSource = std::make_unique<HdMtlxShaderSource>(
+        hdNetwork, terminalNodePath, &hdMtlxData);
+
+    _UpdateMxHdTextureNames(
+        hdMtlxData.hdTextureNodes, hdMtlxData.mxHdTextureMap,
+        terminalNode, terminalNodePath, &mxHdInfo.textureNames);
+
+    _UpdatePrimvarNodes(
+        nullptr, hdNetwork, hdMtlxData.hdPrimvarNodes,
+        &mxHdInfo.primvarMap, &mxHdInfo.primvarDefaultValueMap);
+
+    mxHdInfo.materialTag = materialTagToken.GetString();
+    mxHdInfo.bindlessTexturesEnabled = bindlessTexturesEnabled;
+
+    return HdSt_GenMaterialXShader(
+        std::move(shaderSource), stdLibraries, HdMtlxSearchPaths(),
+        mxHdInfo, apiName);
+
+#else
+    // Old path: build full mx::Document.
     const mx::DocumentPtr mtlxDoc =
         HdMtlxCreateMtlxDocumentFromHdNetwork(
             hdNetwork, terminalNode, terminalNodePath, materialPath,
@@ -1331,13 +1431,12 @@ _GenerateMaterialXShader(
 
     // Add domelight and other textures to mxHdInfo so the proper entry points
     // get generated in MaterialXShaderGen
-    HdSt_MxShaderGenInfo mxHdInfo;
     _UpdateMxHdTextureNames(
         hdMtlxData.hdTextureNodes, hdMtlxData.mxHdTextureMap,
         terminalNode, terminalNodePath, &mxHdInfo.textureNames);
 
     _UpdatePrimvarNodes(
-        mtlxDoc, hdNetwork, hdMtlxData.hdPrimvarNodes, 
+        mtlxDoc, hdNetwork, hdMtlxData.hdPrimvarNodes,
         &mxHdInfo.primvarMap, &mxHdInfo.primvarDefaultValueMap);
 
     mxHdInfo.materialTag = materialTagToken.GetString();
@@ -1346,6 +1445,7 @@ _GenerateMaterialXShader(
     // Generate the glslfx source code from the mtlxDoc
     return HdSt_GenMaterialXShader(
         mtlxDoc, stdLibraries, HdMtlxSearchPaths(), mxHdInfo, apiName);
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
