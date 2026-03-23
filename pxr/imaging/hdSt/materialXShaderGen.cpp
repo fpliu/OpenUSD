@@ -704,6 +704,9 @@ HdStMaterialXShaderGen<Base>::_EmitConstantsUniformsAndTypeDefs(
             std::to_string(int(
                 mxContext.getOptions().hwDirectionalAlbedoMethod)),
             mxStage, false);
+    emitLine("#define AIRY_FRESNEL_ITERATIONS " +
+            std::to_string(mxContext.getOptions().hwAiryFresnelIterations),
+            mxStage, false);
     Base::emitLineBreak(mxStage);
 
     // Add all constants and ensure that values are initialized
@@ -922,6 +925,20 @@ HdStMaterialXShaderGenGlsl::generate(
     return shader;
 }
 
+mx::ShaderPtr
+HdStMaterialXShaderGenGlsl::generate(
+    const std::string& shaderName,
+    mx::ShaderGraphPtr graph,
+    mx::GenContext& mxContext) const
+{
+    mx::ShaderPtr shader = createShader(shaderName, graph, mxContext);
+    mx::ScopedFloatFormatting fmt(mx::Value::FloatFormatFixed);
+    mx::ShaderStage& shaderStage = shader->getStage(mx::Stage::PIXEL);
+    _EmitGlslfxShader(shader->getGraph(), mxContext, shaderStage);
+    replaceTokens(_tokenSubstitutions, shaderStage);
+    return shader;
+}
+
 void
 HdStMaterialXShaderGenGlsl::_EmitGlslfxShader(
     const mx::ShaderGraph& mxGraph,
@@ -1071,6 +1088,20 @@ HdStMaterialXShaderGenVkGlsl::generate(
     mx::ScopedFloatFormatting fmt(mx::Value::FloatFormatFixed);
 
     // Create the glslfx (Pixel) Shader
+    mx::ShaderStage& shaderStage = shader->getStage(mx::Stage::PIXEL);
+    _EmitGlslfxShader(shader->getGraph(), mxContext, shaderStage);
+    replaceTokens(_tokenSubstitutions, shaderStage);
+    return shader;
+}
+
+mx::ShaderPtr
+HdStMaterialXShaderGenVkGlsl::generate(
+    const std::string& shaderName,
+    mx::ShaderGraphPtr graph,
+    mx::GenContext& mxContext) const
+{
+    mx::ShaderPtr shader = createShader(shaderName, graph, mxContext);
+    mx::ScopedFloatFormatting fmt(mx::Value::FloatFormatFixed);
     mx::ShaderStage& shaderStage = shader->getStage(mx::Stage::PIXEL);
     _EmitGlslfxShader(shader->getGraph(), mxContext, shaderStage);
     replaceTokens(_tokenSubstitutions, shaderStage);
@@ -1242,6 +1273,29 @@ HdStMaterialXShaderGenMsl::generate(
         shaderStage.setSourceCode(sourceCode);
     }
 
+    return shader;
+}
+
+mx::ShaderPtr
+HdStMaterialXShaderGenMsl::generate(
+    const std::string& shaderName,
+    mx::ShaderGraphPtr graph,
+    mx::GenContext& mxContext) const
+{
+    mx::ShaderPtr shader = createShader(shaderName, graph, mxContext);
+    mx::ScopedFloatFormatting fmt(mx::Value::FloatFormatFixed);
+    mx::ShaderStage& shaderStage = shader->getStage(mx::Stage::PIXEL);
+    _EmitGlslfxMetalShader(shader->getGraph(), mxContext, shaderStage);
+    replaceTokens(_tokenSubstitutions, shaderStage);
+    MetalizeGeneratedShader(shaderStage);
+    {
+        std::string sourceCode = shaderStage.getSourceCode();
+        size_t loc = sourceCode.find("float radians(float degree)");
+        if (loc != std::string::npos) {
+            sourceCode.insert(loc, "//");
+        }
+        shaderStage.setSourceCode(sourceCode);
+    }
     return shader;
 }
 

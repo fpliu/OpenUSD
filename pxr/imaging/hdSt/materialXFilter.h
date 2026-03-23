@@ -16,6 +16,10 @@
 #include <MaterialXFormat/Util.h>
 #include <MaterialXGenShader/Shader.h>
 
+#ifdef PXR_MATERIALX_GENSHADER2_ENABLED
+#include <MaterialXGenShader2/IShaderSource.h>
+#endif
+
 PXR_NAMESPACE_OPEN_SCOPE
 
 // Storing MaterialX-Hydra counterparts and other Hydra specific information
@@ -54,6 +58,17 @@ MaterialX::ShaderPtr HdSt_GenMaterialXShader(
     MaterialX::FileSearchPath const& searchPath,
     HdSt_MxShaderGenInfo const& mxHdInfo=HdSt_MxShaderGenInfo(),
     TfToken const& apiName=TfToken());
+
+#ifdef PXR_MATERIALX_GENSHADER2_ENABLED
+// Generates the glslfx shader from an IShaderSource (no mx::Document required).
+HDST_API
+MaterialX::ShaderPtr HdSt_GenMaterialXShader(
+    std::unique_ptr<MaterialX::IShaderSource> shaderSource,
+    MaterialX::DocumentPtr const& stdLibraries,
+    MaterialX::FileSearchPath const& searchPath,
+    HdSt_MxShaderGenInfo const& mxHdInfo=HdSt_MxShaderGenInfo(),
+    TfToken const& apiName=TfToken());
+#endif
 
 PXR_NAMESPACE_CLOSE_SCOPE
 
